@@ -6,21 +6,27 @@ import time
 from io import BytesIO
 from docx import Document
 from docx.shared import Inches
+import pandas as pd
 
-# ページ取得関数
-def get_page_text(url, get_images=True):
+# === 単元情報の読み込み ===
+@st.cache_data
+def load_unit_mapping(uploaded_file):
+    df = pd.read_csv(uploaded_file)
+    return dict(zip(df['問題番号'], df['単元名']))
+
+# === ページ取得関数 ===
+def get_page_text(url, qid, unit_map, get_images=True):
     try:
         resp = requests.get(url)
         if resp.status_code != 200:
             return None
         soup = BeautifulSoup(resp.text, 'html.parser')
-        category = soup.find('span', class_='button-small-line')
+        category = unit_map.get(qid, soup.find('span', class_='button-small-line').text.strip() if soup.find('span', class_='button-small-line') else '分野名なし')
         problem = soup.find('div', class_='quiz-body mb-64')
         choices = [f"{c.find('span', class_='choice-header').text.strip()} {c.find_all('span')[1].text.strip()}"
                    for c in soup.find_all('div', class_='box-select')]
         h4s = soup.find_all('h4')
         ans = h4s[0].text.strip() if h4s else '解答なし'
-        qid = re.search(r'([0-9]{3}[A-Za-z][0-9]+)', h4s[1].text).group(1) if len(h4s) >=2 else '問題番号なし'
         expl = soup.find('div', class_='explanation').text.strip() if soup.find('div', class_='explanation') else '解説なし'
         imgs = []
         if get_images:
@@ -29,7 +35,7 @@ def get_page_text(url, get_images=True):
                 if img and img.get('src'):
                     imgs.append(img['src'].replace('thumb_', ''))
         return {
-            "category": category.text.strip() if category else '分野名なし',
+            "category": category,
             "problem": problem.text.strip() if problem else '問題文なし',
             "choices": choices,
             "answer": ans,
@@ -40,14 +46,14 @@ def get_page_text(url, get_images=True):
     except:
         return None
 
-# Word生成関数
+# === Word生成関数 ===
 def create_word_doc(pages, year, label, include_images=True):
     doc = Document()
     doc.add_heading(f'{year}年 医師国家試験問題（{label}）', 0)
     doc.add_paragraph(f"取得問題数: {len(pages)}問")
     for i, p in enumerate(pages, 1):
         doc.add_heading(f"問題{ i } {p['question_id']}", level=2)
-        doc.add_paragraph(f"分野: {p['category']}")
+        doc.add_paragraph(f"単元: {p['category']}")
         doc.add_paragraph(p['problem'])
         if include_images and p['images']:
             for url in p['images']:
@@ -68,8 +74,8 @@ def create_word_doc(pages, year, label, include_images=True):
     doc.save(fn)
     return fn
 
-# セクションごとに処理
-def scrape_sections(year, sections, include_images=True):
+# === セクションごとの取得関数 ===
+def scrape_sections(year, sections, unit_map, include_images=True):
     collected = []
     for sec_idx, sec in enumerate(sections):
         st.markdown(f"### ▶️ セクション {sec} を取得中...")
@@ -78,7 +84,7 @@ def scrape_sections(year, sections, include_images=True):
         for i, num in enumerate(range(1, 81)):
             qid = f"{year}{sec}{num}"
             url = f"https://medu4.com/{qid}"
-            data = get_page_text(url, get_images=include_images)
+            data = get_page_text(url, qid, unit_map, get_images=include_images)
             if data:
                 collected.append(data)
                 fail_count = 0
@@ -92,38 +98,35 @@ def scrape_sections(year, sections, include_images=True):
         bar.empty()
     return collected
 
-# UI
-st.title("🩺 国試問題取得ツール（セクション分割 & 途中停止対応）")
+# === Streamlit UI ===
+st.title("🩺 国試問題取得ツール + 単元分類 (from CSV)")
 
+uploaded_file = st.file_uploader("問題番号と単元名のCSVをアップロード", type=["csv"])
 year = st.text_input("年度を入力（例: 100）")
 include_images = st.checkbox("画像も取得する", value=True)
 
-col1, col2 = st.columns(2)
+if uploaded_file and year:
+    unit_map = load_unit_mapping(uploaded_file)
+    col1, col2 = st.columns(2)
 
-with col1:
-    if st.button("A〜Cセクション取得開始"):
-        if year:
+    with col1:
+        if st.button("A〜Cセクション取得"):
             ac_sections = ['A', 'B', 'C']
             with st.spinner("A〜Cセクションを取得中..."):
-                ac_data = scrape_sections(year, ac_sections, include_images)
+                ac_data = scrape_sections(year, ac_sections, unit_map, include_images)
                 if ac_data:
                     fn_ac = create_word_doc(ac_data, year, "A-C", include_images)
                     st.success("✅ A〜Cセクション完了！")
                     with open(fn_ac, "rb") as f:
                         st.download_button("A〜CのWordファイルをダウンロード", f, file_name=fn_ac)
-                else:
-                    st.error("❌ A〜Cセクションで有効な問題が取得できませんでした。")
 
-with col2:
-    if st.button("D〜Iセクション取得開始"):
-        if year:
+    with col2:
+        if st.button("D〜Iセクション取得"):
             di_sections = ['D', 'E', 'F', 'G', 'H', 'I']
             with st.spinner("D〜Iセクションを取得中..."):
-                di_data = scrape_sections(year, di_sections, include_images)
+                di_data = scrape_sections(year, di_sections, unit_map, include_images)
                 if di_data:
                     fn_di = create_word_doc(di_data, year, "D-I", include_images)
                     st.success("✅ D〜Iセクション完了！")
                     with open(fn_di, "rb") as f:
                         st.download_button("D〜IのWordファイルをダウンロード", f, file_name=fn_di)
-                else:
-                    st.error("❌ D〜Iセクションで有効な問題が取得できませんでした。")
