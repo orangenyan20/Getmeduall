@@ -41,9 +41,9 @@ def get_page_text(url, get_images=True):
         return None
 
 # Word生成関数
-def create_word_doc(pages, year, include_images=True):
+def create_word_doc(pages, year, label, include_images=True):
     doc = Document()
-    doc.add_heading(f'{year}年 医師国家試験問題', 0)
+    doc.add_heading(f'{year}年 医師国家試験問題（{label}）', 0)
     doc.add_paragraph(f"取得問題数: {len(pages)}問")
     for i, p in enumerate(pages, 1):
         doc.add_heading(f"問題{ i } {p['question_id']}", level=2)
@@ -64,39 +64,66 @@ def create_word_doc(pages, year, include_images=True):
         doc.add_paragraph(p['answer'])
         doc.add_paragraph("解説: " + p['explanation'])
         doc.add_page_break()
-    fn = f"{year}_medu4.docx"
+    fn = f"{year}_{label}_medu4.docx"
     doc.save(fn)
     return fn
 
-# UI
-st.title("🩺 国試問題取得ツール")
+# セクションごとに処理
+def scrape_sections(year, sections, include_images=True):
+    collected = []
+    for sec_idx, sec in enumerate(sections):
+        st.markdown(f"### ▶️ セクション {sec} を取得中...")
+        bar = st.progress(0)
+        fail_count = 0
+        for i, num in enumerate(range(1, 81)):
+            qid = f"{year}{sec}{num}"
+            url = f"https://medu4.com/{qid}"
+            data = get_page_text(url, get_images=include_images)
+            if data:
+                collected.append(data)
+                fail_count = 0
+            else:
+                fail_count += 1
+                if fail_count >= 3:
+                    st.warning(f"⚠ {sec}セクションで3問連続失敗 → スキップします")
+                    break
+            bar.progress((i + 1) / 80)
+            time.sleep(0.15)
+        bar.empty()
+    return collected
 
-year = st.text_input("年度を入力してください（例: 100）")
+# UI
+st.title("🩺 国試問題取得ツール（セクション分割 & 途中停止対応）")
+
+year = st.text_input("年度を入力（例: 100）")
 include_images = st.checkbox("画像も取得する", value=True)
 
-if st.button("開始") and year:
-    sections = [chr(ord('A') + i) for i in range(9)]  # A〜I
-    all_pages = []
-    with st.spinner("問題を収集中…"):
-        for sec in sections:
-            st.write(f"→ セクション {year}{sec} の取得開始")
-            fail_count = 0
-            for num in range(1, 81):  # 1〜80
-                qid = f"{year}{sec}{num}"
-                url = f"https://medu4.com/{qid}"
-                data = get_page_text(url, get_images=include_images)
-                if data:
-                    all_pages.append(data)
-                    st.write(f"✅ {qid} を取得")
-                    fail_count = 0  # 成功したらリセット
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("A〜Cセクション取得開始"):
+        if year:
+            ac_sections = ['A', 'B', 'C']
+            with st.spinner("A〜Cセクションを取得中..."):
+                ac_data = scrape_sections(year, ac_sections, include_images)
+                if ac_data:
+                    fn_ac = create_word_doc(ac_data, year, "A-C", include_images)
+                    st.success("✅ A〜Cセクション完了！")
+                    with open(fn_ac, "rb") as f:
+                        st.download_button("A〜CのWordファイルをダウンロード", f, file_name=fn_ac)
                 else:
-                    st.write(f"❌ {qid} が見つかりません")
-                    fail_count += 1
-                    if fail_count >= 3:
-                        st.write(f"⚠ 3問連続失敗 → セクション {sec} をスキップします")
-                        break
-                time.sleep(0.2)
-    filename = create_word_doc(all_pages, year, include_images)
-    st.success("✅ 完了しました！")
-    with open(filename, "rb") as f:
-        st.download_button("Wordファイルをダウンロード", f, file_name=filename)
+                    st.error("❌ A〜Cセクションで有効な問題が取得できませんでした。")
+
+with col2:
+    if st.button("D〜Iセクション取得開始"):
+        if year:
+            di_sections = ['D', 'E', 'F', 'G', 'H', 'I']
+            with st.spinner("D〜Iセクションを取得中..."):
+                di_data = scrape_sections(year, di_sections, include_images)
+                if di_data:
+                    fn_di = create_word_doc(di_data, year, "D-I", include_images)
+                    st.success("✅ D〜Iセクション完了！")
+                    with open(fn_di, "rb") as f:
+                        st.download_button("D〜IのWordファイルをダウンロード", f, file_name=fn_di)
+                else:
+                    st.error("❌ D〜Iセクションで有効な問題が取得できませんでした。")
