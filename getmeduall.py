@@ -32,7 +32,8 @@ def get_page_text(url, get_images=True):
                    for c in soup.find_all('div', class_='box-select')]
         h4s = soup.find_all('h4')
         ans = h4s[0].text.strip() if h4s else '解答なし'
-        qid = re.search(r'([0-9]{3}[A-Za-z][0-9]+)', h4s[1].text).group(1) if len(h4s) >=2 else '問題番号なし'
+        qid = re.search(r'([0-9]{3}[A-Za-z][0-9]+)', h4s[1].text) if len(h4s) >= 2 else None
+        qid = qid.group(1) if qid else '問題番号なし'
         expl = soup.find('div', class_='explanation').text.strip() if soup.find('div', class_='explanation') else '解説なし'
         imgs = []
         if get_images:
@@ -54,12 +55,16 @@ def get_page_text(url, get_images=True):
 def create_word_doc(pages, year, label, topic_map, include_images=True):
     doc = Document()
     doc.add_heading(f'{year}年 医師国家試験問題（{label}）', 0)
-    doc.add_paragraph(f"取得問題数: {len(pages)}問")
-    for i, p in enumerate(pages, 1):
+
+    valid_pages = [p for p in pages if p['problem'] != '問題文なし']
+    doc.add_paragraph(f"取得問題数: {len(valid_pages)}問（※問題文なしは除外）")
+
+    for i, p in enumerate(valid_pages, 1):
         doc.add_heading(f"問題{ i } {p['question_id']}", level=2)
         unit = topic_map.get(p['question_id'], "分野名なし")
         doc.add_paragraph(f"分野: {unit}")
         doc.add_paragraph(p['problem'])
+
         if include_images and p['images']:
             for url in p['images']:
                 try:
@@ -69,12 +74,14 @@ def create_word_doc(pages, year, label, topic_map, include_images=True):
                         doc.add_picture(img_stream, width=Inches(2.5))
                 except:
                     pass
+
         doc.add_paragraph("選択肢：")
         for c in p['choices']:
             doc.add_paragraph(c)
         doc.add_paragraph(p['answer'])
         doc.add_paragraph("解説: " + p['explanation'])
         doc.add_page_break()
+
     fn = f"{year}_{label}_medu4.docx"
     doc.save(fn)
     return fn
