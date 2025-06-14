@@ -111,7 +111,7 @@ def scrape_sections(year, sections, topic_map, include_images=True):
     return collected
 
 # 🎛️ UI
-st.title("🩺 国試問題取得ツール（GitHub連携版）")
+st.title("🩺 国試問題取得ツール2（GitHub連携版）")
 year = st.text_input("年度を入力（例: 100）")
 include_images = st.checkbox("画像も取得する", value=True)
 
