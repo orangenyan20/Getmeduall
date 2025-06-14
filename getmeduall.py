@@ -28,24 +28,25 @@ def get_page_text(url, get_images=True):
             return None
         soup = BeautifulSoup(resp.text, 'html.parser')
         problem = soup.find('div', class_='quiz-body mb-64')
-        choices = [f"{c.find('span', class_='choice-header').text.strip()} {c.find_all('span')[1].text.strip()}"
-                   for c in soup.find_all('div', class_='box-select')]
+        if not problem or not problem.text.strip():
+            return None  # 問題文がないならスキップ
+        choices = [
+            f"{c.find('span', class_='choice-header').text.strip()} {c.find_all('span')[1].text.strip()}"
+            for c in soup.find_all('div', class_='box-select')
+        ]
         h4s = soup.find_all('h4')
         ans = h4s[0].text.strip() if h4s else '解答なし'
-        qid = re.search(r'([0-9]{3}[A-Za-z][0-9]+)', h4s[1].text).group(1) if len(h4s) >=2 else '問題番号なし'
+        qid = re.search(r'([0-9]{3}[A-Za-z][0-9]+)', h4s[1].text).group(1) if len(h4s) >= 2 else '問題番号なし'
         expl = soup.find('div', class_='explanation').text.strip() if soup.find('div', class_='explanation') else '解説なし'
         imgs = []
-
         if get_images:
-            for d in soup.find_all('div', class_='box-quiz-image'):
-                for a in d.find_all('a', href=True):
-                    href = a['href']
-                    if '.jpg' in href:
-                        imgs.append(href.replace('thumb_', ''))
-
+            for d in soup.find_all('div', class_='box-quiz-image mb-32'):
+                img = d.find('img')
+                if img and img.get('src'):
+                    imgs.append(img['src'].replace('thumb_', ''))
         return {
             "question_id": qid,
-            "problem": problem.text.strip() if problem else '問題文なし',
+            "problem": problem.text.strip(),
             "choices": choices,
             "answer": ans,
             "explanation": expl,
@@ -107,7 +108,7 @@ def scrape_sections(year, sections, topic_map, include_images=True):
     return collected
 
 # 🎛️ UI
-st.title("🩺 国試問題取得ツール（GitHub連携版）")
+st.title("🩺 国試問題取得ツール")
 year = st.text_input("年度を入力（例: 100）")
 include_images = st.checkbox("画像も取得する", value=True)
 
